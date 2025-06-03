@@ -168,6 +168,7 @@ CREATE INDEX idx_login_history_account ON account_login_history(account_id, logi
 CREATE INDEX idx_account_rank_season_points ON account_rank(season, rank_points DESC);
 
 
+
 -- Funciones
 -- Win rate de un jugador (%) [0-100]
 CREATE OR REPLACE FUNCTION get_win_rate(p_account_id INT)
@@ -179,14 +180,18 @@ RETURNS NUMERIC LANGUAGE SQL IMMUTABLE AS $$
      WHERE account_id = p_account_id;
 $$;
 
+SELECT get_win_rate(1);
+
 -- Veces jugadas de un campeón por un jugador
 CREATE OR REPLACE FUNCTION get_champion_play_count(p_account_id INT, p_champion_id INT)
 RETURNS INT LANGUAGE SQL IMMUTABLE AS $$
     SELECT COUNT(*)
       FROM match_participants
-     WHERE account_id = p_account_id
+     WHERE participant_id = p_account_id
        AND champion_id = p_champion_id;
 $$;
+
+SELECT get_champion_play_count(1, 101);
 
 -- Total de RP gastados en campeones y skins por un jugador
 CREATE OR REPLACE FUNCTION get_total_rp_spent(p_account_id INT)
@@ -203,31 +208,56 @@ RETURNS NUMERIC LANGUAGE SQL IMMUTABLE AS $$
                  WHERE sp.account_id = p_account_id), 0);
 $$;
 
+SELECT get_total_rp_spent(1);
+
 -- Enmascarar tarjeta de crédito (sólo últimos 4 dígitos visibles)
 CREATE OR REPLACE FUNCTION mask_credit_card(cc TEXT)
 RETURNS TEXT LANGUAGE SQL IMMUTABLE AS $$
     SELECT overlay(cc placing '****-****-****-' from 1 for length(cc)-4);
 $$;
 
+SELECT mask_credit_card('1234-5678-9101-1121');
+
 -- Resumen de cuenta (username, RP balance, wins, losses, etc.)
+
+DROP FUNCTION get_account_summary(integer)
+
 CREATE OR REPLACE FUNCTION get_account_summary(p_account_id INT)
-RETURNS TABLE(account_id INT, username TEXT, rp_balance NUMERIC, total_matches INT, wins INT, losses INT) AS $$
+RETURNS TABLE(
+    account_id INT,
+    username TEXT,
+    rp_balance NUMERIC,
+    total_matches INT,
+    wins INT,
+    losses INT
+) AS $$
 BEGIN
     RETURN QUERY
-    SELECT a.account_id, a.username, a.rp_balance,
-           s.total_matches, s.wins, s.losses
-      FROM accounts a
-      JOIN account_stats s ON a.account_id = s.account_id
-     WHERE a.account_id = p_account_id;
+    SELECT 
+        a.account_id::INT,
+        a.username::TEXT,
+        a.rp_balance::NUMERIC,
+        s.total_matches::INT,
+        s.wins::INT,
+        s.losses::INT
+    FROM accounts a
+    JOIN account_stats s ON a.account_id = s.account_id
+    WHERE a.account_id = p_account_id;
 END;
 $$ LANGUAGE plpgsql;
 
+SELECT * FROM get_account_summary(3);
+
+
 -- Top N jugadores por victorias
+
+DROP FUNCTION get_top_players(integer)
+
 CREATE OR REPLACE FUNCTION get_top_players(p_limit INT)
 RETURNS TABLE(account_id INT, username TEXT, wins INT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT a.account_id, a.username, s.wins
+    SELECT a.account_id, a.username::TEXT, s.wins
       FROM accounts a
       JOIN account_stats s ON a.account_id = s.account_id
      ORDER BY s.wins DESC
@@ -235,13 +265,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+SELECT * FROM get_top_players(1);
 
 -- Triggers
 -- Trigger BEFORE INSERT en accounts para hashear la contraseña
 CREATE OR REPLACE FUNCTION accounts_before_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-    -- Se espera que NEW.password_hash contenga la contraseña en texto plano
     NEW.password_hash := crypt(NEW.password_hash, gen_salt('bf'));
     RETURN NEW;
 END;
@@ -250,7 +280,15 @@ CREATE TRIGGER trg_accounts_hash
 BEFORE INSERT ON accounts
 FOR EACH ROW EXECUTE FUNCTION accounts_before_insert();
 
+
+INSERT INTO accounts (account_id, username, password_hash, rp_balance, email, server_id)
+VALUES (100, 'testuser100', 'mi_password_plain', 1000, 'testuser100@example.com', 8);
+
+
+SELECT username, password_hash FROM accounts WHERE account_id = 100;
+
 -- Trigger AFTER INSERT en accounts para inicializar account_stats
+
 CREATE OR REPLACE FUNCTION accounts_after_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -258,11 +296,15 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_accounts_stats
 AFTER INSERT ON accounts
 FOR EACH ROW EXECUTE FUNCTION accounts_after_insert();
 
+SELECT * FROM account_stats WHERE account_id = 100;
+
 -- Trigger AFTER INSERT en rp_purchases para sumar RP al balance
+
 CREATE OR REPLACE FUNCTION rp_purchase_after_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -272,11 +314,24 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_rp_add
 AFTER INSERT ON rp_purchases
 FOR EACH ROW EXECUTE FUNCTION rp_purchase_after_insert();
 
--- Trigger AFTER INSERT en champion_purchases para restar RP del balance
+-- Inserta una compra de RP para el usuario
+INSERT INTO rp_purchases (purchase_id, account_id, amount, purchase_date)
+VALUES (1, 100, 500, CURRENT_DATE);
+
+
+-- Verifica que el rp_balance se haya actualizado
+SELECT rp_balance FROM accounts WHERE account_id = 100;
+
+
+
+
+-- Trigger AFTER INSERT en champion_purchases para restar RP del balance al comprar un campeon
+
 CREATE OR REPLACE FUNCTION champion_purchase_after_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -289,11 +344,25 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_champion_buy
 AFTER INSERT ON champion_purchases
 FOR EACH ROW EXECUTE FUNCTION champion_purchase_after_insert();
 
--- Trigger AFTER INSERT en skin_purchases para restar RP del balance
+-- Asegúramos que exista un campeón con champion_id = 10 y precio, por ejemplo:
+INSERT INTO champions (champion_id, name, price) VALUES (10, 'ChampionX', 300);
+
+-- Insertamos la compra de campeón para el usuario
+INSERT INTO champion_purchases (purchase_id, account_id, champion_id)
+VALUES (1, 100, 10);
+
+-- Verifica rp_balance actualizado (disminuido en 300)
+SELECT rp_balance FROM accounts WHERE account_id = 100;
+
+
+
+-- Trigger AFTER INSERT en skin_purchases para restar RP del balance al comprar una skin
+
 CREATE OR REPLACE FUNCTION skin_purchase_after_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
@@ -306,11 +375,24 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_skin_buy
 AFTER INSERT ON skin_purchases
 FOR EACH ROW EXECUTE FUNCTION skin_purchase_after_insert();
 
+-- Asegúramos que exista una skin con skin_id = 20 y precio, por ejemplo:
+INSERT INTO skins (skin_id, champion_id ,name, price ) VALUES (20, 10 ,'SkinX', 150);
+
+-- Insertamos la compra de skin para el usuario
+INSERT INTO skin_purchases (purchase_id, account_id, skin_id)
+VALUES (1, 100, 20);
+
+-- Verificamos si hizo la compra(disminuido en 150)
+SELECT rp_balance FROM accounts WHERE account_id = 100;
+
+
 -- Trigger AFTER INSERT en account_login_history para actualizar last_login
+
 CREATE OR REPLACE FUNCTION login_history_after_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -320,11 +402,20 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_login_update
 AFTER INSERT ON account_login_history
 FOR EACH ROW EXECUTE FUNCTION login_history_after_insert();
 
+INSERT INTO account_login_history (login_id, account_id, login_time)
+VALUES (1, 100, NOW());
+
+-- Verifica last_login actualizado en accounts por el id del usuario
+SELECT last_login FROM accounts WHERE account_id = 100;
+
+
 -- Trigger AFTER INSERT en match_participants para actualizar account_stats
+
 CREATE OR REPLACE FUNCTION match_participants_after_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -338,9 +429,17 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_match_update_stats
 AFTER INSERT ON match_participants
 FOR EACH ROW EXECUTE FUNCTION match_participants_after_insert();
+
+INSERT INTO match_participants (participant_id, match_id, summoner_id)
+VALUES (100, 1, 5);
+
+-- Verifica account_stats actualizado
+SELECT total_matches, total_kills, total_assists, wins, losses
+FROM account_stats WHERE account_id = 100;
 
 
 -- Sp's
