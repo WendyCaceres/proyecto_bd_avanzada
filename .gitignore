@@ -2,3 +2,8 @@ package-lock.json
 package.json
 venv/
 node_modules/
+MASTER-SLAVE/master_data/
+MASTER-SLAVE/slave1_data/
+MASTER-SLAVE/slave2_data/
+SHARDING/shard_lan_data/
+SHARDING/shard_las_data/

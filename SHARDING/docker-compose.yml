@@ -1,0 +1,26 @@
+version: '3.9'
+
+services:
+  shard_las:
+    image: postgres:latest
+    container_name: shard_las
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: shardpass
+      POSTGRES_DB: lol_shard_las
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./shard_las_data:/var/lib/postgresql/data
+
+  shard_lan:
+    image: postgres:latest
+    container_name: shard_lan
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: shardpass
+      POSTGRES_DB: lol_shard_lan
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./shard_lan_data:/var/lib/postgresql/data
