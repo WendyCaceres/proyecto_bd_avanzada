@@ -1,0 +1,63 @@
+version: '3.9'
+services:
+  mysql_master:
+    image: mysql:latest
+    container_name: mysql_master
+    environment:
+      MYSQL_ROOT_PASSWORD: masterpass
+      MYSQL_DATABASE: lol_juego
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_HOST: '%'
+    ports:
+      - "3306:3306"
+    command:
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+    volumes:
+      - ./master_data:/var/lib/mysql
+
+  mysql_slave1:
+    image: mysql:latest
+    container_name: mysql_slave1
+    depends_on:
+      - mysql_master
+    environment:
+      MYSQL_ROOT_PASSWORD: slavepass
+      MYSQL_DATABASE: lol_juego
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3307:3306"
+    command:
+      --server-id=2
+      --relay-log=relay-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+    volumes:
+      - ./slave1_data:/var/lib/mysql
+
+  mysql_slave2:
+    image: mysql:latest
+    container_name: mysql_slave2
+    depends_on:
+      - mysql_master
+    environment:
+      MYSQL_ROOT_PASSWORD: slavepass
+      MYSQL_DATABASE: lol_juego
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3308:3306"
+    command:
+      --server-id=3
+      --relay-log=relay-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+    volumes:
+      - ./slave2_data:/var/lib/mysql
